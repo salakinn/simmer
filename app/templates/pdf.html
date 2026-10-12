@@ -1,0 +1,29 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><style>
+@page { size: A4; margin: 20mm 19mm 18mm; @bottom-right { content: "SIMMER  ·  " counter(page); color: #777; font: 8pt sans-serif; } }
+body { font-family: "DejaVu Sans", sans-serif; color: #222; font-size: 10pt; line-height: 1.55; }
+.brand { color:#8a4b35; font-size:9pt; font-weight:700; letter-spacing: .23em; text-transform:uppercase; margin-bottom:15mm; }
+h1 { font-family: "DejaVu Serif", serif; font-size:28pt; font-weight:400; line-height:1.2; margin:0 0 5mm; }
+.description { font-size:11pt; color:#555; margin:0 0 8mm; }
+.meta { border-top:1px solid #bbb; border-bottom:1px solid #bbb; padding:3mm 0; margin:0 0 9mm; color:#555; font-size:9pt; }
+.meta span { margin-right:7mm; white-space:nowrap; }
+.hero { max-width:100%; max-height:70mm; object-fit:cover; margin:0 0 8mm; }
+h2 { font-family:"DejaVu Serif",serif; font-size:16pt; font-weight:400; border-bottom:1px solid #c4b4a9; padding-bottom:2mm; margin:10mm 0 5mm; break-after:avoid; }
+ul { padding-left:5mm; margin:0; } li { padding:0 0 2.5mm 1mm; break-inside:avoid; }
+ol { padding-left:8mm; margin:0; } ol li { padding-left:2mm; padding-bottom:6mm; break-inside:avoid; }
+.source { margin-top:12mm; padding-top:3mm; border-top:1px solid #ddd; color:#777; font-size:7.5pt; overflow-wrap:anywhere; }
+</style></head><body>
+<div class="brand">Simmer / Rezept</div>
+<h1>{{ recipe.title }}</h1>
+{% if recipe.description %}<p class="description">{{ recipe.description }}</p>{% endif %}
+<div class="meta">
+{% if recipe.servings %}<span>{{ recipe.servings }} Portionen</span>{% endif %}
+{% if recipe.prep_minutes is not none %}<span>Vorbereitung {{ recipe.prep_minutes }} Min.</span>{% endif %}
+{% if recipe.cook_minutes is not none %}<span>Kochen {{ recipe.cook_minutes }} Min.</span>{% endif %}
+{% if recipe.total_minutes is not none %}<span>Gesamt {{ recipe.total_minutes }} Min.</span>{% endif %}
+{% if recipe.author %}<span>Von {{ recipe.author }}</span>{% endif %}
+</div>
+{% if image_data %}<img class="hero" src="{{ image_data }}" alt="Rezeptbild">{% endif %}
+<h2>Zutaten</h2><ul>{% for item in recipe.ingredients %}<li>{{ item.text }}</li>{% endfor %}</ul>
+<h2>Zubereitung</h2><ol>{% for step in recipe.steps %}<li>{{ step.text }}</li>{% endfor %}</ol>
+{% if recipe.source_name or recipe.source_url %}<div class="source">Quelle: {{ recipe.source_name or recipe.source_url }}{% if recipe.source_url %} · {{ recipe.source_url }}{% endif %}</div>{% endif %}
+</body></html>

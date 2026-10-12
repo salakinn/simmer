@@ -1,0 +1,15 @@
+services:
+  simmer:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: sqlite:////app/data/simmer.db
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - simmer_data:/app/data
+    restart: unless-stopped
+volumes:
+  simmer_data:
