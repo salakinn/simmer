@@ -8,6 +8,7 @@ class Ingredient(BaseModel):
     quantity: str | None = None
     unit: str | None = None
     name: str | None = None
+    group: str | None = None
 
 
 class Step(BaseModel):

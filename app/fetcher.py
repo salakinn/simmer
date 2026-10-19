@@ -58,7 +58,7 @@ def resolve_public_ip(host: str, port: int) -> str:
     return sorted(ips)[0]
 
 
-def fetch(url: str, *, max_bytes: int | None = None, content_types: tuple[str, ...] = ("text/html",), redirects: int = 5) -> tuple[bytes, str, str]:
+def fetch(url: str, *, max_bytes: int | None = None, content_types: tuple[str, ...] = ("text/html",), redirects: int = 5, headers: dict[str, str] | None = None) -> tuple[bytes, str, str]:
     limit = max_bytes or settings.max_html_bytes
     current = url
     for _ in range(redirects + 1):
@@ -68,7 +68,7 @@ def fetch(url: str, *, max_bytes: int | None = None, content_types: tuple[str, .
         path = (parsed.path or "/") + ("?" + parsed.query if parsed.query else "")
         connection = (SafeHTTPSConnection if scheme == "https" else SafeHTTPConnection)(host, ip, port, settings.request_timeout)
         try:
-            connection.request("GET", path, headers={"Host": parsed.netloc, "User-Agent": "Simmer/0.1 (+local recipe importer)", "Accept": ", ".join(content_types), "Accept-Encoding": "identity"})
+            connection.request("GET", path, headers={**(headers or {}), "Host": parsed.netloc, "User-Agent": "Simmer/0.1 (+local recipe importer)", "Accept": ", ".join(content_types), "Accept-Encoding": "identity"})
             response = connection.getresponse()
             if response.status in {301, 302, 303, 307, 308}:
                 location = response.getheader("Location")

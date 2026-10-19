@@ -117,7 +117,7 @@ def read_recipe(recipe_id: int, db: Session = Depends(get_db)):
 def update_recipe(recipe_id: int, body: RecipeUpdate, db: Session = Depends(get_db)):
     record = get_recipe(db, recipe_id)
     values = body.model_dump()
-    values["ingredients"] = [(ingredient(x.text) if x.quantity is None and x.unit is None and x.name is None else x).model_dump() for x in body.ingredients]
+    values["ingredients"] = [(ingredient(x.text).model_copy(update={"group": x.group}) if x.quantity is None and x.unit is None and x.name is None else x).model_dump() for x in body.ingredients]
     values["steps"] = [x.model_dump() for x in body.steps]
     old_image_url = record.image_url
     new_image_data = record.image_data

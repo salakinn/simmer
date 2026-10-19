@@ -4,6 +4,7 @@ from urllib.parse import urlsplit, urljoin
 from bs4 import BeautifulSoup
 from pydantic import ValidationError
 from .schemas import Ingredient, RecipeData, Step
+from .fetcher import fetch
 
 
 class ExtractionError(Exception):
@@ -105,6 +106,42 @@ def scraper_data(html: str, url: str) -> dict:
         return {}
 
 
+def microdata_steps(html: str) -> list[str]:
+    """Read all HowToStep nodes, not just the first text in a HowToSection."""
+    soup = BeautifulSoup(html, "html.parser")
+    steps = []
+    for container in soup.select('[itemprop~="recipeInstructions"]'):
+        # A nested instruction scope is already handled by its outer scope.
+        if container.find_parent(attrs={"itemprop": "recipeInstructions"}):
+            continue
+        nodes = container.select('[itemtype$="/HowToStep"]')
+        if not nodes:
+            nodes = [container]
+        for node in nodes:
+            texts = node.select('[itemprop~="text"]')
+            if not texts:
+                texts = [node]
+            fragments = []
+            for text in texts:
+                content = BeautifulSoup(str(text), "html.parser")
+                for unwanted in content.select('script, style, meta'):
+                    unwanted.decompose()
+                for image in content.find_all("img"):
+                    # Recipe sites use icons for essential machine settings.
+                    # Rezeptwelt also supplies a neighbouring text equivalent.
+                    label = image.find_next_sibling()
+                    if label and "tmrc-custom-buttons-name" in label.get("class", []):
+                        image.decompose()
+                    else:
+                        image.replace_with(image.get("alt") or image.get("title") or "")
+                fragment = plain(content.get_text(" ", strip=True))
+                if fragment:
+                    fragments.append(fragment)
+            if fragments:
+                steps.append(" ".join(fragments))
+    return steps
+
+
 def normalize(raw: dict, url: str, fallback: dict | None = None) -> RecipeData:
     fallback = fallback or {}
     def pick(key, alternate=None):
@@ -154,6 +191,80 @@ def normalize(raw: dict, url: str, fallback: dict | None = None) -> RecipeData:
 
 
 def extract(html: str, url: str) -> RecipeData:
+    host = (urlsplit(url).hostname or "").lower()
+    if host in {"monsieur-cuisine.com", "www.monsieur-cuisine.com"}:
+        recipe = monsieur_cuisine(html, url)
+        if recipe is not None:
+            return recipe
     raw = jsonld_recipe(html) or {}
     fallback = scraper_data(html, url)
-    return normalize(raw, url, fallback)
+    instructions = microdata_steps(html)
+    existing = step_texts(raw.get("recipeInstructions") or fallback.get("steps"))
+    if instructions and len(instructions) >= len(existing) and sum(map(len, instructions)) >= sum(map(len, existing)):
+        raw["recipeInstructions"] = instructions
+    recipe = normalize(raw, url, fallback)
+    if host in {"chefkoch.de", "www.chefkoch.de"}:
+        # JSON-LD flattens the groups. Read every visible ingredient table,
+        # keeping repeated ingredients (e.g. flour in both dough and crumble).
+        ingredients = []
+        for table in BeautifulSoup(html, "html.parser").select("table.ds-ingredients-table"):
+            group = plain(table.select_one("h3").get_text()) if table.select_one("h3") else None
+            for row in table.select("tbody tr"):
+                cells = row.find_all("td", recursive=False)
+                if len(cells) == 2:
+                    text = plain(" ".join(cell.get_text(" ", strip=True) for cell in cells))
+                    if text:
+                        ingredients.append(ingredient(text).model_copy(update={"group": group}))
+        if len(ingredients) >= len(recipe.ingredients):
+            recipe.ingredients = ingredients
+    return recipe
+
+
+def monsieur_cuisine(html: str, url: str) -> RecipeData | None:
+    for script in BeautifulSoup(html, "html.parser").find_all("script"):
+        text = script.string or script.get_text()
+        match = re.search(r"\bwindow\.siteConfig\s*=\s*", text)
+        if not match:
+            continue
+        try:
+            config, _ = json.JSONDecoder().raw_decode(text[match.end():])
+        except ValueError:
+            continue
+        if not isinstance(config, dict):
+            continue
+        recipe_id = config.get("recipeId")
+        if type(recipe_id) is not int or recipe_id <= 0:
+            continue
+        # Fixed public endpoint; never trust an API URL supplied by the page.
+        language = urlsplit(url).path.split("/")[1]
+        locales = {"de": "de-DE", "en": "en-GB", "fr": "fr-FR", "es": "es-ES", "it": "it-IT", "pt-pt": "pt-PT"}
+        data, _, _ = fetch(
+            f"https://mc-api.tecpal.com/api/v2/recipes/{recipe_id}",
+            content_types=("application/json",),
+            headers={"Accept-Language": locales.get(language, language), "device-type": "web"},
+        )
+        try:
+            raw = json.loads(data)["data"]["recipe"]
+            servings = raw["servingSizes"]
+            serving = next((s for s in servings if s["id"] == raw.get("defaultServingSizeId")), servings[0])
+            items = serving["ingredients"]
+            if any(not plain(item.get("name")) for item in items):
+                raise ValueError("Missing ingredient names")
+            texts = [" ".join(str(item[key]) for key in ("amount", "unit", "name") if item.get(key) not in (None, "")) for item in items]
+            recipe = normalize({
+                "name": raw.get("name"), "description": raw.get("description"),
+                "author": raw.get("author"), "image": (raw.get("thumbnail") or {}).get("landscape"),
+                "recipeYield": " ".join(str(serving[k]) for k in ("amount", "servingUnit") if serving.get(k) is not None),
+                "prep_minutes": serving.get("preparationDuration"), "total_minutes": serving.get("duration"),
+                "recipeCategory": raw.get("categories"), "keywords": raw.get("tags"),
+                "recipeIngredient": texts,
+                # Full prose includes device settings and tips, unlike step titles.
+                "recipeInstructions": serving.get("instruction"),
+            }, url)
+            groups = {g["id"]: plain(g.get("name")) for g in serving.get("ingredientGroups", [])}
+            for item, source in zip(recipe.ingredients, items):
+                item.group = groups.get(source.get("ingredientGroupId"))
+            return recipe
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise ExtractionError("Die Monsieur-Cuisine-Rezeptdaten sind unvollständig oder ungültig.") from exc
+    return None
