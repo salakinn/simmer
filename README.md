@@ -40,7 +40,7 @@ Für den lokalen Start in `.env` `DATABASE_URL=sqlite:///./data/simmer.db` setze
 
 Die manuelle Bearbeitung verwendet eine Zutat beziehungsweise einen Zubereitungsschritt pro Zeile. Die strukturierte API speichert Zutaten zusätzlich mit optionaler Menge, Einheit und Bezeichnung. Beim Bearbeiten in der Weboberfläche bleibt der vollständige Zutatentext erhalten; erkennbare Mengen und Einheiten werden beim Speichern erneut aufgeteilt.
 
-Chefkoch-Zutatengruppen (z. B. Teig, Belag und Streusel) bleiben in der Ansicht und im PDF erhalten. Beim Bearbeiten markieren `[Gruppenname]` eine neue Gruppe und `[]` Zutaten ohne Gruppe; in der API heißt das optionale Zutatenfeld `group`. Öffentliche Monsieur-Cuisine-Rezepte werden über die Rezept-API der Seite importiert, ohne JavaScript im Browser auszuführen.
+Zutatengruppen von Chefkoch (z. B. Teig, Belag und Streusel) und Jo Semola (z. B. Hauptteig und Sauerteig) bleiben in der Ansicht und im PDF erhalten. Beim Bearbeiten markieren `[Gruppenname]` eine neue Gruppe und `[]` Zutaten ohne Gruppe; in der API heißt das optionale Zutatenfeld `group`. Öffentliche Monsieur-Cuisine-Rezepte werden über die Rezept-API der Seite importiert, ohne JavaScript im Browser auszuführen.
 
 ## API
 

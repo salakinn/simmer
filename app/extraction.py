@@ -203,6 +203,20 @@ def extract(html: str, url: str) -> RecipeData:
     if instructions and len(instructions) >= len(existing) and sum(map(len, instructions)) >= sum(map(len, existing)):
         raw["recipeInstructions"] = instructions
     recipe = normalize(raw, url, fallback)
+    if host in {"josemola.de", "www.josemola.de"}:
+        # JSON-LD flattens the dough groups; keep the visible ingredient blocks.
+        ingredients = []
+        for block in BeautifulSoup(html, "html.parser").select("section.ingredients .ingredients-blocks > .block"):
+            heading = block.select_one("h3")
+            group = plain(heading.get_text(" ", strip=True)) if heading else None
+            for row in block.select("li"):
+                amount = row.select_one(".amount")
+                name = row.select_one(".title")
+                if name and plain(name.get_text(" ", strip=True)):
+                    text = " ".join(node.get_text(" ", strip=True) for node in (amount, name) if node)
+                    ingredients.append(ingredient(text).model_copy(update={"group": group}))
+        if len(ingredients) >= len(recipe.ingredients):
+            recipe.ingredients = ingredients
     if host in {"chefkoch.de", "www.chefkoch.de"}:
         # JSON-LD flattens the groups. Read every visible ingredient table,
         # keeping repeated ingredients (e.g. flour in both dough and crumble).
