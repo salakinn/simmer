@@ -49,6 +49,77 @@ def test_incomplete_recipe():
     assert duration('unbekannt') is None
 
 
+def test_link_preview_is_not_saved_until_reviewed(client):
+    with patch('app.importer.fetch', return_value=(HTML.encode(), URL, 'text/html')):
+        response = client.post('/api/recipes/preview', json={'url': URL})
+        second = client.post('/api/recipes/preview', json={'url': URL})
+    assert response.status_code == second.status_code == 200
+    draft = response.json()
+    assert 'id' not in draft
+    assert draft['title'] == 'Ofengemüse'
+    assert draft['source_url'] == URL
+    assert client.get('/api/recipes').json() == []
+    draft['title'] = 'Mein geprüftes Gemüse'
+    draft['servings'] = '4'
+    draft['ingredients'][0] = {'text': '750 g Kartoffeln', 'group': 'Gemüse'}
+    draft['steps'][0]['text'] = 'Ofen auf 180 Grad vorheizen.'
+    with patch('app.main.fetch') as fetch_mock:
+        saved = client.post('/api/recipes', json=draft)
+        fetch_mock.assert_not_called()
+    assert saved.status_code == 201, saved.text
+    recipe = saved.json()
+    assert recipe['title'] == 'Mein geprüftes Gemüse'
+    assert recipe['source_type'] == 'url'
+    assert recipe['source_url'] == URL
+    assert recipe['servings'] == '4'
+    assert recipe['ingredients'][0]['quantity'] == '750'
+    assert recipe['ingredients'][0]['group'] == 'Gemüse'
+    assert recipe['steps'][0]['text'] == 'Ofen auf 180 Grad vorheizen.'
+    assert len(client.get('/api/recipes').json()) == 1
+
+
+def test_preview_image_can_be_saved_or_removed_without_refetch(client):
+    import base64
+    import json
+    from io import BytesIO
+    from PIL import Image
+    buffer = BytesIO()
+    Image.new('RGB', (24, 24), '#a75739').save(buffer, format='PNG')
+    image_bytes = buffer.getvalue()
+    raw = {'@type': 'Recipe', 'name': 'Suppe', 'recipeIngredient': ['1 l Wasser'],
+           'recipeInstructions': ['Kochen.'], 'image': 'https://recipes.example/suppe.png'}
+    html = '<script type="application/ld+json">' + json.dumps(raw) + '</script>'
+    with patch('app.importer.fetch', side_effect=[(html.encode(), URL, 'text/html'),
+                                               (image_bytes, raw['image'], 'image/png')]):
+        preview = client.post('/api/recipes/preview', json={'url': URL})
+    assert preview.status_code == 200, preview.text
+    draft = preview.json()
+    assert draft['image_upload'] == 'data:image/png;base64,' + base64.b64encode(image_bytes).decode()
+    assert client.get('/api/recipes').json() == []
+    with patch('app.main.fetch') as fetch_mock:
+        saved = client.post('/api/recipes', json=draft)
+        fetch_mock.assert_not_called()
+    assert saved.status_code == 201
+    assert saved.json()['has_image'] is True
+    assert client.get(f"/api/recipes/{saved.json()['id']}/image").content == image_bytes
+    draft['image_upload'] = None
+    draft['remove_image'] = True
+    with patch('app.main.fetch') as fetch_mock:
+        without_image = client.post('/api/recipes', json=draft)
+        fetch_mock.assert_not_called()
+    assert without_image.status_code == 201
+    assert without_image.json()['has_image'] is False
+    assert without_image.json()['image_url'] is None
+
+
+def test_failed_preview_does_not_create_recipe(client):
+    with patch('app.importer.fetch', return_value=(b'<html></html>', URL, 'text/html')):
+        response = client.post('/api/recipes/preview', json={'url': URL})
+    assert response.status_code == 422
+    assert client.post('/api/recipes/preview', json={'url': 'file:///etc/passwd'}).status_code == 422
+    assert client.get('/api/recipes').json() == []
+
+
 def test_manual_recipe_creation(client):
     assert client.get('/recipes/new').status_code == 200
     assert 'data-new-recipe="true"' in client.get('/recipes/new').text

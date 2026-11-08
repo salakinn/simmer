@@ -10,12 +10,13 @@ from .config import settings
 from .database import RecipeRecord
 from .extraction import extract
 from .fetcher import FetchError, fetch
+from .schemas import RecipePreview
 
 logger = logging.getLogger("simmer")
 
 
-def import_recipe_url(url: str, db: Session) -> RecipeRecord:
-    """Add an imported recipe to the session; the caller commits the transaction."""
+def preview_recipe_url(url: str) -> RecipePreview:
+    """Extract a recipe and its image without writing to the database."""
     html_bytes, final_url, _ = fetch(url)
     html = UnicodeDammit(html_bytes, is_html=True).unicode_markup or html_bytes.decode("utf-8", "replace")
     data = extract(html, final_url)
@@ -33,9 +34,13 @@ def import_recipe_url(url: str, db: Session) -> RecipeRecord:
             image_data = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
         except FetchError as exc:
             logger.info("Rezeptbild übersprungen: %s", exc)
-    values["ingredients"] = [x.model_dump() for x in data.ingredients]
-    values["steps"] = [x.model_dump() for x in data.steps]
-    record = RecipeRecord(**values, image_data=image_data)
+    return RecipePreview(**values, image_upload=image_data)
+
+
+def import_recipe_url(url: str, db: Session) -> RecipeRecord:
+    """Add an imported recipe to the session; the caller commits the transaction."""
+    preview = preview_recipe_url(url)
+    record = RecipeRecord(**preview.model_dump(exclude={"image_upload"}), image_data=preview.image_upload)
     db.add(record)
     db.flush()
     return record

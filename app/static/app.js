@@ -16,12 +16,7 @@ async function loadHome() {
   const list=document.getElementById('recipe-list');
   try { const recipes=await api('/api/recipes'); list.innerHTML=recipes.length?recipes.map(card).join(''):'<p class="empty">Noch keine Rezepte gespeichert. Importiere einen Link oder erfasse dein erstes Rezept manuell.</p>'; }
   catch(e){list.textContent=e.message;}
-  const form=document.getElementById('import-form');
-  form.addEventListener('submit',async e=>{
-    e.preventDefault(); const button=form.querySelector('button'); const error=document.getElementById('form-error'); error.textContent=''; button.disabled=true; button.firstChild.textContent='Import läuft… ';
-    try {const recipe=await api('/api/recipes/import',{method:'POST',body:JSON.stringify({url:document.getElementById('url').value})}); location.href=`/recipes/${recipe.id}`;}
-    catch(err){error.textContent=err.message;button.disabled=false;button.firstChild.textContent='Importieren';}
-  });
+
 }
 function metadata(r){return [['Portionen',r.servings],['Vorbereitung',minutes(r.prep_minutes)],['Kochen',minutes(r.cook_minutes)],['Gesamt',minutes(r.total_minutes)],['Autor',r.author]].filter(x=>x[1]).map(x=>`<span>${esc(x[0])}: ${esc(x[1])}</span>`).join('');}
 function ingredientGroups(items) {
@@ -58,10 +53,11 @@ function field(label,name,value='',type='text'){return `<div class="field"><labe
 function area(label,name,value='',hint='',long=false){return `<div class="field"><label for="${name}">${label}</label>${hint?`<p class="hint">${hint}</p>`:''}<textarea id="${name}" name="${name}" class="${long?'long':''}">${esc(value)}</textarea></div>`;}
 function imagePickerMarkup(r) {
   const limit=Number(document.body.dataset.maxImageBytes || 5242880);
-  return `<div class="field image-picker"><label for="recipe-image">Rezeptbild</label><div id="image-drop" class="image-drop"><input id="recipe-image" type="file" accept="image/jpeg,image/png,image/webp" aria-describedby="image-hint image-error"><label for="recipe-image" class="image-drop-label"><img id="image-preview" ${r.has_image?`src="/api/recipes/${r.id}/image?v=${r.version}"`: 'hidden'} alt="Vorschau des Rezeptbilds"><span>Bild hierher ziehen oder <strong>Datei auswählen</strong></span><span id="image-hint" class="hint">JPG, PNG oder WebP · bis ${Math.round(limit/1024/1024*10)/10} MB · ein Bild pro Rezept</span></label></div><button id="remove-image" class="button secondary" type="button" ${r.has_image?'':'hidden'}>Bild entfernen</button><p id="image-error" class="error" role="alert"></p></div>`;
+  const image=r.image_upload || (r.has_image?`/api/recipes/${r.id}/image?v=${r.version}`:null);
+  return `<div class="field image-picker"><label for="recipe-image">Rezeptbild</label><div id="image-drop" class="image-drop"><input id="recipe-image" type="file" accept="image/jpeg,image/png,image/webp" aria-describedby="image-hint image-error"><label for="recipe-image" class="image-drop-label"><img id="image-preview" ${image?`src="${esc(image)}"`:'hidden'} alt="Vorschau des Rezeptbilds"><span>Bild hierher ziehen oder <strong>Datei auswählen</strong></span><span id="image-hint" class="hint">JPG, PNG oder WebP · bis ${Math.round(limit/1024/1024*10)/10} MB · ein Bild pro Rezept</span></label></div><button id="remove-image" class="button secondary" type="button" ${image?'':'hidden'}>Bild entfernen</button><p id="image-error" class="error" role="alert"></p></div>`;
 }
 function setupImagePicker(root,r) {
-  const state={upload:null,remove:false,reading:Promise.resolve()};
+  const state={upload:r.image_upload||null,remove:false,reading:Promise.resolve()};
   const input=root.querySelector('#recipe-image');
   const drop=root.querySelector('#image-drop');
   const preview=root.querySelector('#image-preview');
@@ -98,18 +94,80 @@ function setupImagePicker(root,r) {
   remove.onclick=()=>{revision++;state.upload=null;state.remove=true;preview.hidden=true;preview.removeAttribute('src');remove.hidden=true;error.textContent='';input.value='';};
   return state;
 }
-function renderEdit(r, creating=false){
- const root=document.getElementById('detail-content');
- root.innerHTML=`<form id="edit-form" class="edit-form"><p class="eyebrow">${creating?'Dein eigenes Rezept':'Rezept bearbeiten'}</p><h1>${creating?'Neues Rezept':esc(r.title)}</h1><p>${creating?'Rezeptname, Zutaten und Zubereitung sind Pflichtfelder. Alle weiteren Angaben sind optional.':''}</p>${field('Rezeptname','title',r.title)}${area('Beschreibung','description',r.description||'')}<div class="edit-grid">${field('Portionen','servings',r.servings||'')}${field('Vorbereitung (Minuten)','prep_minutes',r.prep_minutes??'','number')}${field('Kochzeit (Minuten)','cook_minutes',r.cook_minutes??'','number')}${field('Gesamtzeit (Minuten)','total_minutes',r.total_minutes??'','number')}</div>${imagePickerMarkup(r)}${field('Kategorien, kommagetrennt','categories',r.categories.join(', '))}${field('Tags, kommagetrennt','tags',r.tags.join(', '))}${area('Zutaten','ingredients',r.ingredients.map(x=>x.text).join('\n'),'Eine Zutat pro Zeile',true)}${area('Zubereitungsschritte','steps',r.steps.map(x=>x.text).join('\n'),'Ein Schritt pro Zeile',true)}<div class="actions"><button class="button" type="submit">${creating?'Rezept speichern':'Änderungen speichern'}</button><button class="button secondary" id="cancel-button" type="button">Abbrechen</button></div><p id="edit-error" class="error" role="alert"></p></form>`;
-  root.querySelector('#ingredients').value=ingredientLines(r.ingredients);
-  root.querySelector('#ingredients').previousElementSibling.textContent='Eine Zutat pro Zeile; Gruppenüberschriften in [eckigen Klammern].';
-  document.getElementById('cancel-button').onclick=()=>{if(creating)location.href='/';else renderDetail(r);};
-  for(const name of ['title','ingredients','steps']) root.querySelector(`#${name}`).required=true;
-  root.querySelector('#title').maxLength=500;
-  for(const input of root.querySelectorAll('input[type=number]')) {input.min='0';input.step='1';}
+function linkImportMarkup(r) {
+  return `<form id="import-form" class="import-panel"><label for="url">Rezeptlink (optional)</label><div class="input-row"><input id="url" type="url" placeholder="https://…" value="${esc(r.source_url||'')}" required><button type="submit">Daten übernehmen</button></div><p id="form-error" class="error" role="alert"></p>${r.source_url?'<p class="import-status" role="status">Daten übernommen. Du kannst sie jetzt anpassen und speichern.</p>':''}</form>`;
+}
+function renderEdit(r, creating=false) {
+  const root=document.getElementById('detail-content');
+  root.innerHTML=`<div class="recipe-entry">${creating?'<h1>Rezept erfassen</h1>'+linkImportMarkup(r):''}<form id="edit-form" class="edit-form">${creating?'':`<h1>${esc(r.title)}</h1>`}${field('Rezeptname','title',r.title)}${area('Beschreibung','description',r.description||'')}<div class="edit-grid">${field('Portionen','servings',r.servings||'')}${field('Vorbereitung (Minuten)','prep_minutes',r.prep_minutes??'','number')}${field('Kochzeit (Minuten)','cook_minutes',r.cook_minutes??'','number')}${field('Gesamtzeit (Minuten)','total_minutes',r.total_minutes??'','number')}</div>${imagePickerMarkup(r)}${field('Kategorien, kommagetrennt','categories',r.categories.join(', '))}${field('Tags, kommagetrennt','tags',r.tags.join(', '))}${area('Zutaten','ingredients',ingredientLines(r.ingredients),'Eine Zutat pro Zeile; Gruppenüberschriften in [eckigen Klammern].',true)}${area('Zubereitungsschritte','steps',r.steps.map(x=>x.text).join('\n'),'Ein Schritt pro Zeile',true)}<div class="actions"><button class="button" type="submit">${creating?'Rezept speichern':'Änderungen speichern'}</button><button class="button secondary" id="cancel-button" type="button">Abbrechen</button></div><p id="edit-error" class="error" role="alert"></p></form></div>`;
+  const form=root.querySelector('#edit-form');
   const imageState=setupImagePicker(root,r);
-  if(creating) root.querySelector('#title').focus();
-  document.getElementById('edit-form').onsubmit=async e=>{e.preventDefault();const form=e.target;const value=k=>form.elements[k].value.trim(); const lines=k=>value(k).split('\n').map(x=>x.trim()).filter(Boolean);const number=k=>value(k)===''?null:Number(value(k));const body={...r,title:value('title'),description:value('description')||null,servings:value('servings')||null,prep_minutes:number('prep_minutes'),cook_minutes:number('cook_minutes'),total_minutes:number('total_minutes'),categories:value('categories').split(',').map(x=>x.trim()).filter(Boolean),tags:value('tags').split(',').map(x=>x.trim()).filter(Boolean),ingredients:parseIngredients(value('ingredients')),steps:lines('steps').map(x=>({text:x}))};const error=document.getElementById('edit-error');error.textContent='';if(!body.ingredients.length||!body.steps.length){error.textContent='Bitte mindestens eine Zutat und einen Zubereitungsschritt eingeben.';return;}const button=form.querySelector('[type=submit]');button.disabled=true;button.textContent='Wird gespeichert…';try{await imageState.reading;body.image_upload=imageState.upload;body.remove_image=imageState.remove;const updated=await api(creating?'/api/recipes':`/api/recipes/${r.id}`,{method:creating?'POST':'PUT',body:JSON.stringify(body)});if(creating)location.href=`/recipes/${updated.id}`;else renderDetail(updated);}catch(err){error.textContent=err.message;}finally{button.disabled=false;button.textContent=creating?'Rezept speichern':'Änderungen speichern';}};
+  let dirty=false;
+  form.addEventListener('input',()=>{dirty=true;});
+  form.addEventListener('change',()=>{dirty=true;});
+  root.querySelector('#image-drop').addEventListener('drop',()=>{dirty=true;});
+  root.querySelector('#remove-image').addEventListener('click',()=>{dirty=true;});
+  root.querySelector('#cancel-button').onclick=()=>{if(creating)location.href='/';else renderDetail(r);};
+  for(const name of ['title','ingredients','steps']) form.elements[name].required=true;
+  form.elements.title.maxLength=500;
+  for(const input of form.querySelectorAll('input[type=number]')) {input.min='0';input.step='1';}
+
+  if(creating) {
+    const importForm=root.querySelector('#import-form');
+    importForm.onsubmit=async event=>{
+      event.preventDefault();
+      if(dirty&&!confirm('Vorhandene Eingaben durch die Daten aus dem Rezeptlink ersetzen?'))return;
+      const button=importForm.querySelector('button');
+      const error=root.querySelector('#form-error');
+      error.textContent='';
+      const controls=[...form.querySelectorAll('input, textarea, button')];
+      controls.forEach(control=>{control.disabled=true;});
+      button.disabled=true;button.textContent='Wird geladen…';
+      try {
+        const preview=await api('/api/recipes/preview',{method:'POST',body:JSON.stringify({url:importForm.elements.url.value.trim()})});
+        renderEdit(preview,true);
+      } catch(err) {
+        error.textContent=err.message;
+      } finally {
+        controls.forEach(control=>{control.disabled=false;});
+        button.disabled=false;button.textContent='Daten übernehmen';
+      }
+    };
+  }
+
+  form.onsubmit=async event=>{
+    event.preventDefault();
+    const value=key=>form.elements[key].value.trim();
+    const lines=key=>value(key).split('\n').map(x=>x.trim()).filter(Boolean);
+    const number=key=>value(key)===''?null:Number(value(key));
+    const body={...r,title:value('title'),description:value('description')||null,
+      servings:value('servings')||null,prep_minutes:number('prep_minutes'),
+      cook_minutes:number('cook_minutes'),total_minutes:number('total_minutes'),
+      categories:value('categories').split(',').map(x=>x.trim()).filter(Boolean),
+      tags:value('tags').split(',').map(x=>x.trim()).filter(Boolean),
+      ingredients:parseIngredients(value('ingredients')),steps:lines('steps').map(text=>({text}))};
+    const error=root.querySelector('#edit-error');
+    error.textContent='';
+    if(!body.ingredients.length||!body.steps.length) {
+      error.textContent='Bitte mindestens eine Zutat und einen Zubereitungsschritt eingeben.';
+      return;
+    }
+    const button=form.querySelector('[type=submit]');
+    button.disabled=true;button.textContent='Wird gespeichert…';
+    const importButton=root.querySelector('#import-form button');
+    if(importButton)importButton.disabled=true;
+    try {
+      await imageState.reading;
+      body.image_upload=imageState.upload;body.remove_image=imageState.remove;
+      const updated=await api(creating?'/api/recipes':`/api/recipes/${r.id}`,{method:creating?'POST':'PUT',body:JSON.stringify(body)});
+      if(creating)location.href=`/recipes/${updated.id}`;else renderDetail(updated);
+    } catch(err) {
+      error.textContent=err.message;
+    } finally {
+      button.disabled=false;button.textContent=creating?'Rezept speichern':'Änderungen speichern';
+      if(importButton)importButton.disabled=false;
+    }
+  };
 }
 async function loadDetail(){try{renderDetail(await api(`/api/recipes/${document.body.dataset.recipeId}`));}catch(e){document.getElementById('page-error').textContent=e.message;}}
-if(document.body.dataset.newRecipe)renderEdit({title:'',source_type:'manual',ingredients:[],steps:[],categories:[],tags:[]},true);else if(document.getElementById('import-form'))loadHome();else if(document.body.dataset.recipeId)loadDetail();
+if(document.body.dataset.newRecipe)renderEdit({title:'',source_type:'manual',ingredients:[],steps:[],categories:[],tags:[]},true);else if(document.getElementById('recipe-list'))loadHome();else if(document.body.dataset.recipeId)loadDetail();

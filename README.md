@@ -99,10 +99,11 @@ eigenen Dienstmanager eingebunden werden (systemd, launchd oder Windows-Aufgaben
 
 ## Nutzung
 
-1. Auf der Startseite eine öffentliche HTTP- oder HTTPS-Rezeptadresse einfügen. Alternativ **Rezept manuell erfassen** wählen und Name, Zutaten sowie Zubereitung eingeben.
-2. Simmer liest bevorzugt Schema.org/JSON-LD und ergänzt fehlende Angaben nach Möglichkeit mit `recipe-scrapers`.
-3. Das Rezept auf der Detailseite prüfen. Über **Rezept bearbeiten** alle Textfelder, Zeiten, Zutaten und Schritte korrigieren und speichern.
-4. **PDF herunterladen** erzeugt die Ausgabe aus dem Datenbankeintrag. Die Quellseite wird dafür nicht erneut geladen.
+1. Auf der Startseite **Rezept hinzufügen** wählen. Linkimport und manuelle Erfassung verwenden dieselbe Oberfläche.
+2. Optional einen öffentlichen HTTP-/HTTPS-Rezeptlink eingeben und **Daten übernehmen** wählen. Die Felder und das Bild werden vorgefüllt, ohne einen Datenbankeintrag anzulegen.
+3. Name, Zutaten, Schritte und weitere Angaben prüfen oder manuell ausfüllen. Das Bild kann ersetzt oder entfernt werden.
+4. Erst **Rezept speichern** legt das Rezept in der Sammlung ab. **Abbrechen** verwirft die Erfassung.
+5. Gespeicherte Rezepte lassen sich auf der Detailseite bearbeiten und als PDF herunterladen.
 
 Bei der manuellen Erfassung und Bearbeitung können JPG-, PNG- oder WebP-Bilder per Drag-and-drop oder Dateiauswahl hinzugefügt werden (standardmäßig bis 5 MB). Die Bilder werden lokal gespeichert und auch im PDF verwendet.
 
@@ -119,6 +120,7 @@ Die interaktive API-Dokumentation ist unter `/docs` verfügbar.
 | Methode | Pfad | Zweck |
 | --- | --- | --- |
 | POST | `/api/recipes` | Rezept manuell erfassen, optional mit `image_upload` als Bild-Data-URL |
+| POST | `/api/recipes/preview` | Rezeptlink auslesen und Formular-Daten einschließlich Bild liefern, ohne zu speichern |
 | POST | `/api/recipes/import` | Import mit `{"url":"https://..."}` |
 | GET | `/api/recipes` | Alle Rezepte |
 | GET | `/api/recipes/{id}` | Ein Rezept |

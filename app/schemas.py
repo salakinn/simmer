@@ -56,6 +56,10 @@ class RecipeCreate(RecipeUpdate):
     source_type: str = "manual"
 
 
+class RecipePreview(RecipeData):
+    image_upload: str | None = None
+
+
 class RecipeOut(RecipeData):
     has_image: bool = False
     id: int

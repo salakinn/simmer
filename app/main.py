@@ -16,9 +16,9 @@ from .config import settings
 from .database import RecipeRecord, get_db, init_db
 from .extraction import ExtractionError, ingredient
 from .fetcher import FetchError, fetch
-from .importer import import_recipe_url
+from .importer import import_recipe_url, preview_recipe_url
 from .pdf import render_pdf
-from .schemas import ImportRequest, RecipeCreate, RecipeData, RecipeOut, RecipeUpdate
+from .schemas import ImportRequest, RecipeCreate, RecipeData, RecipeOut, RecipePreview, RecipeUpdate
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("simmer")
@@ -130,10 +130,23 @@ def list_recipes(db: Session = Depends(get_db)):
     return [as_output(record) for record in records]
 
 
+@app.post("/api/recipes/preview", response_model=RecipePreview)
+def preview_recipe(body: ImportRequest):
+    preview = preview_recipe_url(str(body.url))
+    if preview.image_upload is not None:
+        try:
+            preview.image_upload = uploaded_image(preview.image_upload)
+        except HTTPException:
+            preview.image_upload = None
+    if preview.image_upload is None:
+        preview.image_url = None
+    return preview
+
+
 @app.post("/api/recipes", response_model=RecipeOut, status_code=201)
 def create_recipe(body: RecipeCreate, db: Session = Depends(get_db)):
     values = body.model_dump(exclude={"image_upload", "remove_image"})
-    values["source_type"] = "manual"
+    values["source_type"] = "url" if body.source_url else "manual"
     values["ingredients"] = [
         (ingredient(item.text).model_copy(update={"group": item.group})
          if item.quantity is None and item.unit is None and item.name is None else item).model_dump()
@@ -142,6 +155,8 @@ def create_recipe(body: RecipeCreate, db: Session = Depends(get_db)):
     image_data = None
     if body.image_upload is not None:
         image_data = uploaded_image(body.image_upload)
+        values["image_url"] = None
+    elif body.remove_image:
         values["image_url"] = None
     elif body.image_url:
         image_bytes, image_url, media_type = fetch(body.image_url, max_bytes=settings.max_image_bytes, content_types=("image/jpeg", "image/png", "image/webp"))

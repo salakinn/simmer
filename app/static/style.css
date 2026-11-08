@@ -10,3 +10,5 @@ html.pull-refresh-enabled,html.pull-refresh-enabled body{overscroll-behavior-y:n
 
 .import-panel{padding:20px;margin:32px 0 28px;border:1px solid var(--line);border-radius:8px;background:var(--card)}.import-panel .error:empty{display:none}.import-panel .error{margin:12px 0 0}.import-panel .input-row input{background:var(--paper)}.home-actions{display:flex;gap:10px}.home-actions>button,.home-actions>.button{flex:1;min-height:54px;padding:12px 18px;font-size:14px;justify-content:center}
 @media(max-width:760px){.import-panel{padding:16px;margin:24px 0 20px}.home-actions{width:100%}.home-actions>button,.home-actions>.button{padding:12px 10px}.collection{padding-bottom:36px}}
+
+.home-entry{display:flex;justify-content:flex-end;margin:24px 0}.recipe-entry{max-width:850px}.recipe-entry>h1{font-size:clamp(32px,5vw,44px);margin:0 0 24px}.recipe-entry>.import-panel{margin:0 0 28px}.import-status{margin:12px 0 0;color:var(--accent);font-size:14px}.recipe-entry .edit-form{padding-top:4px}@media(max-width:600px){.home-entry .button{width:100%}.recipe-entry>.import-panel{padding:16px}.recipe-entry .input-row button{justify-content:center}}
