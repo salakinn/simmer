@@ -20,7 +20,7 @@ async function loadHome() {
   form.addEventListener('submit',async e=>{
     e.preventDefault(); const button=form.querySelector('button'); const error=document.getElementById('form-error'); error.textContent=''; button.disabled=true; button.firstChild.textContent='Import läuft… ';
     try {const recipe=await api('/api/recipes/import',{method:'POST',body:JSON.stringify({url:document.getElementById('url').value})}); location.href=`/recipes/${recipe.id}`;}
-    catch(err){error.textContent=err.message;button.disabled=false;button.firstChild.textContent='Rezept importieren ';}
+    catch(err){error.textContent=err.message;button.disabled=false;button.firstChild.textContent='Importieren';}
   });
 }
 function metadata(r){return [['Portionen',r.servings],['Vorbereitung',minutes(r.prep_minutes)],['Kochen',minutes(r.cook_minutes)],['Gesamt',minutes(r.total_minutes)],['Autor',r.author]].filter(x=>x[1]).map(x=>`<span>${esc(x[0])}: ${esc(x[1])}</span>`).join('');}
