@@ -49,6 +49,90 @@ def test_incomplete_recipe():
     assert duration('unbekannt') is None
 
 
+def test_manual_recipe_creation(client):
+    assert client.get('/recipes/new').status_code == 200
+    assert 'data-new-recipe="true"' in client.get('/recipes/new').text
+    assert '/recipes/new' in client.get('/').text
+    with patch('app.main.fetch') as fetch_mock:
+        response = client.post('/api/recipes', json={
+            'title': '  Omas Pfannkuchen  ', 'servings': '2', 'prep_minutes': 10,
+            'ingredients': [{'text': '250 g Mehl', 'group': 'Teig'}, {'text': '2 Eier', 'group': 'Teig'}],
+            'steps': [{'text': 'Alles verrühren.'}, {'text': 'In der Pfanne backen.'}],
+        })
+        fetch_mock.assert_not_called()
+    assert response.status_code == 201, response.text
+    recipe = response.json()
+    assert recipe['title'] == 'Omas Pfannkuchen'
+    assert recipe['source_type'] == 'manual'
+    assert recipe['source_url'] is None
+    assert recipe['version'] == 1
+    assert recipe['ingredients'][0] == {'text': '250 g Mehl', 'quantity': '250', 'unit': 'g', 'name': 'Mehl', 'group': 'Teig'}
+    assert client.get(f"/api/recipes/{recipe['id']}").json() == recipe
+    assert client.get('/api/recipes').json() == [recipe]
+    assert client.get(f"/recipes/{recipe['id']}").status_code == 200
+    assert client.get(f"/api/recipes/{recipe['id']}/pdf").content.startswith(b'%PDF-')
+
+
+@pytest.mark.parametrize('changes', [
+    {'title': '   '}, {'ingredients': []}, {'steps': []},
+    {'prep_minutes': -1}, {'source_url': 'file:///tmp/recipe'},
+])
+def test_invalid_manual_recipe_is_not_saved(client, changes):
+    body = {'title': 'Suppe', 'ingredients': [{'text': '1 l Wasser'}], 'steps': [{'text': 'Kochen.'}], **changes}
+    assert client.post('/api/recipes', json=body).status_code == 422
+    assert client.get('/api/recipes').json() == []
+
+
+def test_uploaded_recipe_image_create_update_remove(client):
+    import base64
+    from io import BytesIO
+    from PIL import Image
+    buffer = BytesIO()
+    Image.new('RGB', (32, 24), '#a75739').save(buffer, format='PNG')
+    data = buffer.getvalue()
+    upload = 'data:image/png;base64,' + base64.b64encode(data).decode()
+    body = {'title': 'Suppe mit Bild', 'ingredients': [{'text': '1 l Wasser'}], 'steps': [{'text': 'Kochen.'}], 'image_upload': upload}
+    response = client.post('/api/recipes', json=body)
+    assert response.status_code == 201, response.text
+    recipe = response.json()
+    assert recipe['has_image'] is True
+    assert recipe['image_url'] is None
+    assert 'image_upload' not in recipe
+    path = f"/api/recipes/{recipe['id']}"
+    image = client.get(path + '/image')
+    assert image.headers['content-type'] == 'image/png'
+    assert image.content == data
+    assert client.get(path + '/pdf').content.startswith(b'%PDF-')
+    # Normal text edits preserve the uploaded image.
+    recipe['title'] = 'Suppe umbenannt'
+    assert client.put(path, json=recipe).json()['has_image'] is True
+    assert client.get(path + '/image').content == data
+    assert client.put(path, json={**recipe, 'remove_image': True}).json()['has_image'] is False
+    assert client.get(path + '/image').status_code == 404
+    assert client.put(path, json={**recipe, 'image_upload': upload}).json()['has_image'] is True
+
+
+@pytest.mark.parametrize('upload', [
+    'data:image/svg+xml;base64,PHN2Zz4=',
+    'data:image/png;base64,invalid!',
+    'data:image/png;base64,bm90IGFuIGltYWdl',
+])
+def test_invalid_image_does_not_save_recipe(client, upload):
+    body = {'title': 'Suppe', 'ingredients': [{'text': 'Wasser'}], 'steps': [{'text': 'Kochen.'}], 'image_upload': upload}
+    assert client.post('/api/recipes', json=body).status_code == 422
+    assert client.get('/api/recipes').json() == []
+
+
+def test_image_size_limit(client):
+    from app.config import settings
+    body = {'title': 'Suppe', 'ingredients': [{'text': 'Wasser'}], 'steps': [{'text': 'Kochen.'}], 'image_upload': 'data:image/png;base64,' + 'A' * 200}
+    with patch.object(settings, 'max_image_bytes', 16):
+        response = client.post('/api/recipes', json=body)
+    assert response.status_code == 422
+    assert 'zu groß' in response.json()['detail']
+    assert client.get('/api/recipes').json() == []
+
+
 @pytest.mark.parametrize('url', ['file:///etc/passwd','http://localhost/a','http://127.0.0.1/a','https://169.254.169.254/latest','http://user:pass@example.org/','https://example.org:8443/'])
 def test_url_blocked(url):
     with pytest.raises(FetchError):
@@ -76,7 +160,7 @@ def test_redirect_revalidated():
 
 
 def test_crud_import_pdf(client):
-    with patch('app.main.fetch', return_value=(HTML.encode(), URL, 'text/html')):
+    with patch('app.importer.fetch', return_value=(HTML.encode(), URL, 'text/html')):
         response = client.post('/api/recipes/import', json={'url':URL})
     assert response.status_code == 201, response.text
     recipe = response.json()
@@ -93,7 +177,12 @@ def test_crud_import_pdf(client):
     assert pdf.content.startswith(b'%PDF-')
     from pypdf import PdfReader
     from io import BytesIO
-    text = ''.join(page.extract_text() for page in PdfReader(BytesIO(pdf.content)).pages)
+    pages = PdfReader(BytesIO(pdf.content)).pages
+    assert len(pages) == 2
+    assert 'Zutaten' in pages[0].extract_text()
+    assert 'Zubereitung' not in pages[0].extract_text()
+    assert 'Zubereitung' in pages[1].extract_text()
+    text = ''.join(page.extract_text() for page in pages)
     assert 'Mein Ofengemüse' in text
     assert 'Ofen stark vorheizen' in text
     assert client.delete(f'/api/recipes/{rid}').status_code == 204
@@ -101,7 +190,7 @@ def test_crud_import_pdf(client):
 
 
 def test_bad_import_and_validation(client):
-    with patch('app.main.fetch', return_value=(b'<html></html>', URL, 'text/html')):
+    with patch('app.importer.fetch', return_value=(b'<html></html>', URL, 'text/html')):
         response=client.post('/api/recipes/import',json={'url':URL})
     assert response.status_code==422
     assert response.json()['error']=='extraction_error'
@@ -119,9 +208,26 @@ def test_pdf_long_recipe_keeps_every_step():
     pdf = render_pdf(recipe)
     pages = PdfReader(BytesIO(pdf)).pages
     assert len(pages) >= 2
+    assert 'Zubereitung' not in pages[0].extract_text()
+    assert 'Zubereitung' in pages[1].extract_text()
     text = '\n'.join(page.extract_text() for page in pages)
     assert 'Schritt 1:' in text
     assert 'Schritt 30:' in text
+
+
+def test_pdf_many_ingredients_stay_with_description():
+    from app.pdf import render_pdf
+    from pypdf import PdfReader
+    from io import BytesIO
+    recipe = extract(HTML, URL)
+    recipe.ingredients = [type(recipe.ingredients[0])(text=f'Zutat {i}: Gemüse und Kräuter') for i in range(1, 51)]
+    pages = PdfReader(BytesIO(render_pdf(recipe))).pages
+    assert len(pages) == 2
+    first = pages[0].extract_text()
+    assert 'Zutat 1:' in first
+    assert 'Zutat 50:' in first
+    assert 'Zubereitung' not in first
+    assert 'Zubereitung' in pages[1].extract_text()
 
 
 def test_pdf_with_stored_image():
@@ -129,13 +235,31 @@ def test_pdf_with_stored_image():
     from io import BytesIO
     from PIL import Image
     from app.pdf import render_pdf
-    picture = Image.new('RGB', (32, 20), '#b96b42')
+    picture = Image.new('RGB', (1170, 780), '#b96b42')
     buffer = BytesIO()
     picture.save(buffer, format='PNG')
     image_data = 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode()
-    pdf = render_pdf(extract(HTML, URL), image_data)
+    recipe = extract(HTML, URL)
+    recipe.title = 'Spaghettikürbis mit Schinken und Käse'
+    recipe.description = ('Kürbis mal anders – dieses einfache Spaghettikürbis-Rezept schmeckt '
+                          'mit der cremigen, käsigen Füllung nach echtem Soulfood! '
+                          'Ich liebe das ausgewogene Ofengericht.')
+    recipe.ingredients = [type(recipe.ingredients[0])(text=text) for text in (
+        '1 Spaghettikürbis, mittelgroß (ca. 1 kg)',
+        '150 g Französischer Kräuterfrischkäse (oder andere Sorte wie z. B. Tomate, Paprika)',
+        '100 g Kochschinken', '50 g Bergkäse (z. B. Gruyère oder Appenzeller)',
+        '5 g Sonnenblumenkerne', '1/4 TL Salz', '1 Msp. Pfeffer',
+        '1 Msp. Muskatnuss (frisch gerieben)',
+    )]
+    pdf = render_pdf(recipe, image_data)
     assert pdf.startswith(b'%PDF-')
     assert len(pdf) > 10000
+    from pypdf import PdfReader
+    pages = PdfReader(BytesIO(pdf)).pages
+    assert 'Zutaten' in pages[0].extract_text()
+    assert '1 Msp. Muskatnuss (frisch gerieben)' in pages[0].extract_text()
+    assert 'Zubereitung' not in pages[0].extract_text()
+    assert 'Zubereitung' in pages[1].extract_text()
 
 
 def test_scraper_fallback_normalizes_missing_jsonld():
@@ -189,7 +313,7 @@ def test_chefkoch_groups_survive_crud_and_pdf(client):
     for group, items in groups:
         html += '<table class="ds-ingredients-table"><thead><tr><th><h3>' + group + '</h3></th></tr></thead><tbody>'
         html += ''.join(f'<tr><td>{amount}</td><td>{name}</td></tr>' for amount, name in items) + '</tbody></table>'
-    with patch('app.main.fetch', return_value=(html.encode(), url, 'text/html')):
+    with patch('app.importer.fetch', return_value=(html.encode(), url, 'text/html')):
         response = client.post('/api/recipes/import', json={'url':url})
     assert response.status_code == 201, response.text
     recipe = response.json()
@@ -215,7 +339,7 @@ def test_rezeptwelt_all_steps_and_pdf(client):
     html = Path('tests/fixtures/rezeptwelt.html').read_text()
     url = 'https://www.rezeptwelt.de/hauptgerichte-mit-gemuese-rezepte/kuerbislasagne/gqx3jkpj-b4734-092576-cfcd2-9hfik1n7'
     fallback = {'title':'Kürbislasagne', 'ingredients':['300 g Kürbis'], 'steps':['Zwiebel (geviertelt) und Kürbis5 Sek/Stufe 5 zerkleinern.']}
-    with patch('app.extraction.scraper_data', return_value=fallback), patch('app.main.fetch', return_value=(html.encode(), url, 'text/html')):
+    with patch('app.extraction.scraper_data', return_value=fallback), patch('app.importer.fetch', return_value=(html.encode(), url, 'text/html')):
         response = client.post('/api/recipes/import', json={'url':url})
     assert response.status_code == 201, response.text
     recipe = response.json()
@@ -269,7 +393,8 @@ def test_compact_pdf_ingredients_fit_first_page():
     pdf = PdfReader(BytesIO(render_pdf(recipe, image_data)))
     first_page = pdf.pages[0].extract_text()
     assert 'Simmer / Rezept' not in first_page
-    assert 'Quelle:' not in '\n'.join(page.extract_text() for page in pdf.pages)
+    assert 'Quelle:' not in first_page
+    assert 'Quelle:' in pdf.pages[-1].extract_text()
     assert recipe.title in ' '.join(first_page.split())
     for i in range(1, 25):
         assert f'Zutat {i:02d}:' in first_page

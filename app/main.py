@@ -1,8 +1,10 @@
 import base64
 import logging
+import binascii
+import warnings
+from io import BytesIO
+from PIL import Image, UnidentifiedImageError
 from contextlib import asynccontextmanager
-from urllib.parse import urljoin
-from bs4 import UnicodeDammit
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -12,10 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .config import settings
 from .database import RecipeRecord, get_db, init_db
-from .extraction import ExtractionError, extract, ingredient
+from .extraction import ExtractionError, ingredient
 from .fetcher import FetchError, fetch
+from .importer import import_recipe_url
 from .pdf import render_pdf
-from .schemas import ImportRequest, RecipeData, RecipeOut, RecipeUpdate
+from .schemas import ImportRequest, RecipeCreate, RecipeData, RecipeOut, RecipeUpdate
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("simmer")
@@ -67,36 +70,50 @@ def as_output(record: RecipeRecord) -> RecipeOut:
     return RecipeOut.model_validate(record).model_copy(update={"has_image": bool(record.image_data)})
 
 
+def uploaded_image(value: str) -> str:
+    def reject(detail):
+        raise HTTPException(status_code=422, detail={"error": "invalid_image", "detail": detail})
+
+    if len(value) > 4 * ((settings.max_image_bytes + 2) // 3) + 64:
+        reject("Das Bild ist zu groß.")
+    header, separator, encoded = value.partition(",")
+    if not separator or header not in {"data:image/jpeg;base64", "data:image/png;base64", "data:image/webp;base64"}:
+        reject("Bitte ein JPG-, PNG- oder WebP-Bild auswählen.")
+    try:
+        data = base64.b64decode(encoded, validate=True)
+        if len(data) > settings.max_image_bytes:
+            reject("Das Bild ist zu groß.")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(data)) as image:
+                media_type = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}.get(image.format)
+                if not media_type:
+                    reject("Bitte ein JPG-, PNG- oder WebP-Bild auswählen.")
+                image.verify()
+    except (ValueError, binascii.Error, OSError, UnidentifiedImageError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+        reject("Das Bild konnte nicht gelesen werden. Bitte eine gültige Bilddatei auswählen.")
+    return f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse(request, "index.html")
 
 
+@app.get("/recipes/new", response_class=HTMLResponse)
+def new_recipe_page(request: Request):
+    return templates.TemplateResponse(request, "detail.html", {"new_recipe": True, "max_image_bytes": settings.max_image_bytes})
+
+
 @app.get("/recipes/{recipe_id}", response_class=HTMLResponse)
 def recipe_page(request: Request, recipe_id: int, db: Session = Depends(get_db)):
     get_recipe(db, recipe_id)
-    return templates.TemplateResponse(request, "detail.html", {"recipe_id": recipe_id})
+    return templates.TemplateResponse(request, "detail.html", {"recipe_id": recipe_id, "max_image_bytes": settings.max_image_bytes})
 
 
 @app.post("/api/recipes/import", response_model=RecipeOut, status_code=201)
 def import_recipe(body: ImportRequest, db: Session = Depends(get_db)):
-    html_bytes, final_url, _ = fetch(str(body.url))
-    html = UnicodeDammit(html_bytes, is_html=True).unicode_markup or html_bytes.decode("utf-8", "replace")
-    data = extract(html, final_url)
-    values = data.model_dump()
-    image_data = None
-    if data.image_url:
-        try:
-            image_url = urljoin(final_url, data.image_url)
-            image_bytes, image_url, media_type = fetch(image_url, max_bytes=settings.max_image_bytes, content_types=("image/jpeg", "image/png", "image/webp"))
-            values["image_url"] = image_url
-            image_data = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
-        except FetchError as exc:
-            logger.info("Rezeptbild übersprungen: %s", exc)
-    values["ingredients"] = [x.model_dump() for x in data.ingredients]
-    values["steps"] = [x.model_dump() for x in data.steps]
-    record = RecipeRecord(**values, image_data=image_data)
-    db.add(record)
+    record = import_recipe_url(str(body.url), db)
     db.commit()
     db.refresh(record)
     return as_output(record)
@@ -108,6 +125,30 @@ def list_recipes(db: Session = Depends(get_db)):
     return [as_output(record) for record in records]
 
 
+@app.post("/api/recipes", response_model=RecipeOut, status_code=201)
+def create_recipe(body: RecipeCreate, db: Session = Depends(get_db)):
+    values = body.model_dump(exclude={"image_upload", "remove_image"})
+    values["source_type"] = "manual"
+    values["ingredients"] = [
+        (ingredient(item.text).model_copy(update={"group": item.group})
+         if item.quantity is None and item.unit is None and item.name is None else item).model_dump()
+        for item in body.ingredients
+    ]
+    image_data = None
+    if body.image_upload is not None:
+        image_data = uploaded_image(body.image_upload)
+        values["image_url"] = None
+    elif body.image_url:
+        image_bytes, image_url, media_type = fetch(body.image_url, max_bytes=settings.max_image_bytes, content_types=("image/jpeg", "image/png", "image/webp"))
+        values["image_url"] = image_url
+        image_data = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    record = RecipeRecord(**values, image_data=image_data)
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return as_output(record)
+
+
 @app.get("/api/recipes/{recipe_id}", response_model=RecipeOut)
 def read_recipe(recipe_id: int, db: Session = Depends(get_db)):
     return as_output(get_recipe(db, recipe_id))
@@ -116,12 +157,18 @@ def read_recipe(recipe_id: int, db: Session = Depends(get_db)):
 @app.put("/api/recipes/{recipe_id}", response_model=RecipeOut)
 def update_recipe(recipe_id: int, body: RecipeUpdate, db: Session = Depends(get_db)):
     record = get_recipe(db, recipe_id)
-    values = body.model_dump()
+    values = body.model_dump(exclude={"image_upload", "remove_image"})
     values["ingredients"] = [(ingredient(x.text).model_copy(update={"group": x.group}) if x.quantity is None and x.unit is None and x.name is None else x).model_dump() for x in body.ingredients]
     values["steps"] = [x.model_dump() for x in body.steps]
     old_image_url = record.image_url
     new_image_data = record.image_data
-    if old_image_url != body.image_url:
+    if body.image_upload is not None:
+        new_image_data = uploaded_image(body.image_upload)
+        values["image_url"] = None
+    elif body.remove_image:
+        new_image_data = None
+        values["image_url"] = None
+    elif old_image_url != body.image_url:
         new_image_data = None
         if body.image_url:
             image_bytes, image_url, media_type = fetch(body.image_url, max_bytes=settings.max_image_bytes, content_types=("image/jpeg", "image/png", "image/webp"))

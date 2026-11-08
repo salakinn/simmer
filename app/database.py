@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, DateTime, Integer, String, Text, create_engine, func
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, create_engine, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from .config import settings
 
@@ -29,6 +29,20 @@ class RecipeRecord(Base):
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TelegramUpdate(Base):
+    __tablename__ = "telegram_updates"
+    update_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    reply_text: Mapped[str] = mapped_column(Text, nullable=False)
+    reply_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class TelegramPdfRequest(Base):
+    __tablename__ = "telegram_pdf_requests"
+    update_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    recipe_id: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 engine = create_engine(settings.database_url, connect_args={"check_same_thread": False} if settings.database_url.startswith("sqlite") else {})

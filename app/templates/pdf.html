@@ -11,7 +11,10 @@ h3 { font-size:10pt; margin:3mm 0 1mm; break-after:avoid; }
 .ingredients { break-inside:avoid; }
 ul { padding-left:5mm; margin:0; } li { padding:0 0 1mm 1mm; break-inside:avoid; }
 ol { padding-left:7mm; margin:0; } ol li { padding-left:1mm; padding-bottom:3mm; break-inside:avoid; }
+.source { margin-top:12mm; padding-top:3mm; border-top:1px solid #ddd; color:#777; font-size:7.5pt; overflow-wrap:anywhere; }
+.preparation { break-before:page; }
 </style></head><body>
+<div class="overview">
 <h1>{{ recipe.title }}</h1>
 {% if recipe.description %}<p class="description">{{ recipe.description }}</p>{% endif %}
 <div class="meta">
@@ -22,6 +25,11 @@ ol { padding-left:7mm; margin:0; } ol li { padding-left:1mm; padding-bottom:3mm;
 {% if recipe.author %}<span>Von {{ recipe.author }}</span>{% endif %}
 </div>
 {% if image_data %}<img class="hero" src="{{ image_data }}" alt="Rezeptbild">{% endif %}
-<section class="ingredients"><h2>Zutaten</h2>{% for item in recipe.ingredients %}{% if loop.first or item.group != recipe.ingredients[loop.index0 - 1].group %}{% if not loop.first %}</ul>{% endif %}{% if item.group %}<h3>{{ item.group }}</h3>{% endif %}<ul>{% endif %}<li>{{ item.text }}</li>{% if loop.last %}</ul>{% endif %}{% endfor %}</section>
+<section class="ingredients"><h2>Zutaten</h2>{% for item in recipe.ingredients %}{% if loop.first or item.group != recipe.ingredients[loop.index0 - 1].group %}{% if not loop.first %}</ul>{% endif %}{% if item.group %}<h3>{{ item.group }}</h3>{% endif %}<ul>{% endif %}<li{% if loop.last %} id="last-ingredient"{% endif %}>{{ item.text }}</li>{% if loop.last %}</ul>{% endif %}{% endfor %}</section>
+<div id="overview-end"></div>
+</div>
+<section class="preparation" id="preparation">
 <h2>Zubereitung</h2><ol>{% for step in recipe.steps %}<li>{{ step.text }}</li>{% endfor %}</ol>
+{% if recipe.source_name or recipe.source_url %}<div class="source">Quelle: {{ recipe.source_name or recipe.source_url }}{% if recipe.source_url %} · {{ recipe.source_url }}{% endif %}</div>{% endif %}
+</section>
 </body></html>

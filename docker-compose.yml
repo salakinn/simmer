@@ -7,7 +7,19 @@ services:
     environment:
       DATABASE_URL: sqlite:////app/data/simmer.db
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${SIMMER_PORT:-8001}:8000"
+    volumes:
+      - simmer_data:/app/data
+    restart: unless-stopped
+  telegram:
+    profiles: [telegram]
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: sqlite:////app/data/simmer.db
+    command: ["python", "-m", "app.telegram_bot"]
     volumes:
       - simmer_data:/app/data
     restart: unless-stopped

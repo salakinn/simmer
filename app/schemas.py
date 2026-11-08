@@ -48,7 +48,12 @@ class RecipeData(BaseModel):
 
 
 class RecipeUpdate(RecipeData):
-    pass
+    image_upload: str | None = None
+    remove_image: bool = False
+
+
+class RecipeCreate(RecipeUpdate):
+    source_type: str = "manual"
 
 
 class RecipeOut(RecipeData):

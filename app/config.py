@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     max_html_bytes: int = 2 * 1024 * 1024
     max_image_bytes: int = 5 * 1024 * 1024
     request_timeout: float = 10.0
+    telegram_bot_token: str = ""
+    telegram_allowed_user_ids: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

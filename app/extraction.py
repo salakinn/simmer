@@ -78,16 +78,59 @@ def recipe_nodes(obj):
                 yield from recipe_nodes(obj[key])
 
 
-def jsonld_recipe(html: str) -> dict | None:
+def image_address(value, nodes: dict | None = None, seen: frozenset = frozenset()) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, list):
+        return next((address for item in value if (address := image_address(item, nodes, seen))), None)
+    if isinstance(value, dict):
+        address = image_address(value.get("url") or value.get("contentUrl"), nodes, seen)
+        if address:
+            return address
+        reference = value.get("@id")
+        if isinstance(reference, str) and nodes and reference not in seen:
+            return image_address(nodes.get(reference), nodes, seen | {reference})
+    return None
+
+
+def jsonld_recipe(html: str, url: str = "") -> dict | None:
     soup = BeautifulSoup(html, "html.parser")
     candidates = []
+    nodes = {}
+
+    def index_nodes(value):
+        if isinstance(value, list):
+            for item in value:
+                index_nodes(item)
+        elif isinstance(value, dict):
+            reference = value.get("@id")
+            if isinstance(reference, str):
+                reference = urljoin(url, reference)
+                nodes.setdefault(reference, {}).update(value)
+            for item in value.values():
+                index_nodes(item)
+
     for tag in soup.select('script[type="application/ld+json"]'):
         try:
             raw = json.loads(tag.string or tag.get_text())
             candidates.extend(recipe_nodes(raw))
+            index_nodes(raw)
         except (ValueError, TypeError):
             continue
-    return max(candidates, key=lambda x: len(x.get("recipeIngredient", [])) + len(step_texts(x.get("recipeInstructions"))), default=None)
+    recipe = max(candidates, key=lambda x: len(x.get("recipeIngredient", [])) + len(step_texts(x.get("recipeInstructions"))), default=None)
+    if recipe is not None:
+        # Resolve only local JSON-LD references; image downloads still use the safe fetcher.
+        def relative_references(value):
+            if isinstance(value, list):
+                return [relative_references(item) for item in value]
+            if isinstance(value, dict):
+                return {key: urljoin(url, item) if key == "@id" and isinstance(item, str)
+                        else relative_references(item) for key, item in value.items()}
+            return value
+
+        references = {key: relative_references(value) for key, value in nodes.items()}
+        recipe = {**recipe, "image": image_address(relative_references(recipe.get("image")), references)}
+    return recipe
 
 
 def scraper_data(html: str, url: str) -> dict:
@@ -156,11 +199,7 @@ def normalize(raw: dict, url: str, fallback: dict | None = None) -> RecipeData:
     instructions = pick("recipeInstructions", "steps") or []
     if isinstance(instructions, str) and not instructions.strip():
         instructions = []
-    image = pick("image", "image_url")
-    if isinstance(image, list):
-        image = image[0] if image else None
-    if isinstance(image, dict):
-        image = image.get("url") or image.get("contentUrl")
+    image = image_address(raw.get("image")) or image_address(pick("image_url")) or image_address(fallback.get("image"))
     author = pick("author")
     servings = pick("recipeYield", "servings")
     if isinstance(servings, list):
@@ -196,7 +235,7 @@ def extract(html: str, url: str) -> RecipeData:
         recipe = monsieur_cuisine(html, url)
         if recipe is not None:
             return recipe
-    raw = jsonld_recipe(html) or {}
+    raw = jsonld_recipe(html, url) or {}
     fallback = scraper_data(html, url)
     instructions = microdata_steps(html)
     existing = step_texts(raw.get("recipeInstructions") or fallback.get("steps"))
