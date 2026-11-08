@@ -1,6 +1,10 @@
-# Simmer v0.1
+# Simmer v0.2.0
 
 Simmer importiert Online-Rezepte in ein lokales Archiv. Die gespeicherten, normalisierten Daten lassen sich bearbeiten und als druckfreundliches A4-PDF herunterladen.
+
+Neu in v0.2.0: eigene Rezepte manuell erfassen, Bilder per Drag-and-drop hinzufügen,
+mobile Aktualisierung durch Herunterziehen und ein plattformunabhängiger Hintergrundprozess
+mit automatischen GitHub-Updates. Details stehen in [CHANGELOG.md](CHANGELOG.md).
 
 ## Start mit Docker Compose
 
@@ -13,7 +17,7 @@ docker compose up --build -d
 
 Danach `http://127.0.0.1:8001/` öffnen. Die SQLite-Datenbank liegt im persistenten Docker-Volume `simmer_data`. Stoppen mit `docker compose down`. `docker compose down -v` löscht auch das Datenbank-Volume. Der lokale Port kann mit `SIMMER_PORT` in `.env` geändert werden.
 
-Die Veröffentlichung ist standardmäßig auf `127.0.0.1:8001` beschränkt. Da v0.1 keine Anmeldung hat, Simmer nur lokal oder in einem vertrauenswürdigen Netzwerk betreiben.
+Die Veröffentlichung ist standardmäßig auf `127.0.0.1:8001` beschränkt. Da Simmer keine Anmeldung hat, Simmer nur lokal oder in einem vertrauenswürdigen Netzwerk betreiben.
 
 ## Telegram-Bot (optional)
 
@@ -95,10 +99,14 @@ eigenen Dienstmanager eingebunden werden (systemd, launchd oder Windows-Aufgaben
 
 ## Nutzung
 
-1. Auf der Startseite eine öffentliche HTTP- oder HTTPS-Rezeptadresse einfügen.
+1. Auf der Startseite eine öffentliche HTTP- oder HTTPS-Rezeptadresse einfügen. Alternativ **Rezept manuell erfassen** wählen und Name, Zutaten sowie Zubereitung eingeben.
 2. Simmer liest bevorzugt Schema.org/JSON-LD und ergänzt fehlende Angaben nach Möglichkeit mit `recipe-scrapers`.
 3. Das Rezept auf der Detailseite prüfen. Über **Rezept bearbeiten** alle Textfelder, Zeiten, Zutaten und Schritte korrigieren und speichern.
 4. **PDF herunterladen** erzeugt die Ausgabe aus dem Datenbankeintrag. Die Quellseite wird dafür nicht erneut geladen.
+
+Bei der manuellen Erfassung und Bearbeitung können JPG-, PNG- oder WebP-Bilder per Drag-and-drop oder Dateiauswahl hinzugefügt werden (standardmäßig bis 5 MB). Die Bilder werden lokal gespeichert und auch im PDF verwendet.
+
+Auf Smartphones lässt sich die Start- oder Rezeptseite durch Herunterziehen am oberen Seitenrand und anschließendes Loslassen aktualisieren. Während der Rezepterfassung oder Bearbeitung ist die Geste deaktiviert, damit ungespeicherte Eingaben erhalten bleiben.
 
 Die manuelle Bearbeitung verwendet eine Zutat beziehungsweise einen Zubereitungsschritt pro Zeile. Die strukturierte API speichert Zutaten zusätzlich mit optionaler Menge, Einheit und Bezeichnung. Beim Bearbeiten in der Weboberfläche bleibt der vollständige Zutatentext erhalten; erkennbare Mengen und Einheiten werden beim Speichern erneut aufgeteilt.
 
@@ -132,11 +140,11 @@ Alle Tests verwenden lokale HTML-Fixtures oder Mocks und benötigen keine extern
 
 `URL → sicherer Fetcher → JSON-LD/recipe-scrapers → Normalizer → RecipeRecord → SQLite → PDF-Renderer`
 
-`source_type` und `version` sind Teil des einheitlichen Datenmodells. Extraktion und PDF-Renderer teilen sich nur dieses Modell, keinen quellspezifischen Code. Versionierung bedeutet in v0.1 einen Änderungszähler; frühere Fassungen werden noch nicht gespeichert.
+`source_type` und `version` sind Teil des einheitlichen Datenmodells. Extraktion und PDF-Renderer teilen sich nur dieses Modell, keinen quellspezifischen Code. Die Rezeptversion ist ein Änderungszähler; frühere Fassungen werden noch nicht gespeichert.
 
 - Viele Rezeptseiten liefern weder vollständige strukturierte Daten noch für `recipe-scrapers` erkennbare Angaben. Simmer meldet dann einen verständlichen Importfehler.
 - JavaScript-gerenderte Seiten und Paywalls werden nicht unterstützt.
 - Fehlende Angaben bleiben leer. Bildabruf ist optional; wenn er scheitert, bleibt das Rezept ohne lokal gespeichertes Bild. Bilder werden für das PDF ausschließlich aus den gespeicherten Bilddaten geladen. Externe Ressourcen sind beim PDF-Rendering gesperrt.
 - Abrufe haben Zeit- und Größenlimits. Jeder Redirect und jedes DNS-Ergebnis wird geprüft; private, lokale, Link-local- und reservierte IPs sind gesperrt. HTTP/HTTPS auf Standardports ist erlaubt.
 - Ohne Benutzerkonten ist jede Person mit Netzwerkzugriff auf die Anwendung auch zur Bearbeitung und Löschung berechtigt.
-- Telegram-Linkimport ist optional. Sprachnachrichten, KI-Generierung, Einkaufslisten und Cloud-Synchronisierung sind nicht Bestandteil von v0.1.
+- Telegram-Linkimport ist optional. Sprachnachrichten, KI-Generierung, Einkaufslisten und Cloud-Synchronisierung sind nicht Bestandteil dieser Version.
