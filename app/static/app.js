@@ -9,8 +9,8 @@ async function api(path, options={}) {
   return res.status === 204 ? null : res.json();
 }
 function card(r) {
-  const image = r.has_image ? `<img class="card-image" src="/api/recipes/${r.id}/image?v=${r.version}" alt="">` : '<div class="card-placeholder">✦</div>';
-  return `<a class="recipe-card" href="/recipes/${r.id}">${image}<div class="card-body"><small>${esc(r.source_name || 'Rezept')}</small><h3>${esc(r.title)}</h3><p>${r.total_minutes != null ? `${minutes(r.total_minutes)} · ` : ''}${r.ingredients.length} Zutaten</p></div></a>`;
+  const image = r.has_image ? `<img class="card-image" src="/api/recipes/${r.id}/image?v=${r.version}" alt="">` : '';
+  return `<a class="recipe-card" href="/recipes/${r.id}">${image}<div class="card-body"><h3>${esc(r.title)}</h3><p>${r.total_minutes != null ? `${minutes(r.total_minutes)} · ` : ''}${r.ingredients.length} Zutaten</p></div></a>`;
 }
 async function loadHome() {
   const list=document.getElementById('recipe-list');
