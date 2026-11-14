@@ -474,3 +474,38 @@ def test_compact_pdf_ingredients_fit_first_page():
     text = '\n'.join(page.extract_text() for page in pdf.pages)
     for step in recipe.steps:
         assert step.text in text
+
+
+def test_baking_settings_persist_and_validate(client):
+    body = {'title': 'Apfelkuchen', 'ingredients': [{'text': '3 Äpfel'}],
+            'steps': [{'text': 'Teig backen.'}], 'oven_temperature': 180,
+            'bake_minutes': 45, 'oven_mode': 'Ober-/Unterhitze'}
+    response = client.post('/api/recipes', json=body)
+    assert response.status_code == 201
+    recipe_id = response.json()['id']
+    saved = client.get(f'/api/recipes/{recipe_id}').json()
+    assert (saved['oven_temperature'], saved['bake_minutes'], saved['oven_mode']) == (180, 45, 'Ober-/Unterhitze')
+    body.update(oven_temperature=160, oven_mode='Umluft', bake_minutes=40)
+    updated = client.put(f'/api/recipes/{recipe_id}', json=body)
+    assert updated.status_code == 200
+    assert updated.json()['oven_mode'] == 'Umluft'
+    for invalid in ({'oven_temperature': -1}, {'bake_minutes': -1}, {'oven_mode': 'Grill'}):
+        assert client.put(f'/api/recipes/{recipe_id}', json={**body, **invalid}).status_code == 422
+    body.update(oven_temperature=None, oven_mode=None, bake_minutes=None)
+    assert client.put(f'/api/recipes/{recipe_id}', json=body).json()['oven_temperature'] is None
+
+
+def test_existing_database_gets_baking_fields(tmp_path, monkeypatch):
+    from sqlalchemy import inspect, text
+    from app import database
+    engine = create_engine(f'sqlite:///{tmp_path}/old.db')
+    with engine.begin() as connection:
+        connection.execute(text('CREATE TABLE recipes (id INTEGER PRIMARY KEY, title VARCHAR(500))'))
+        connection.execute(text("INSERT INTO recipes VALUES (1, 'Brot')"))
+    monkeypatch.setattr(database, 'engine', engine)
+    database.init_db()
+    database.init_db()
+    assert {'oven_temperature', 'bake_minutes', 'oven_mode'} <= {c['name'] for c in inspect(engine).get_columns('recipes')}
+    with engine.connect() as connection:
+        assert connection.execute(text('SELECT title, oven_temperature FROM recipes')).one() == ('Brot', None)
+    engine.dispose()

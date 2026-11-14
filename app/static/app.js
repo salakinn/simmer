@@ -14,11 +14,24 @@ function card(r) {
 }
 async function loadHome() {
   const list=document.getElementById('recipe-list');
-  try { const recipes=await api('/api/recipes'); list.innerHTML=recipes.length?recipes.map(card).join(''):'<p class="empty">Noch keine Rezepte gespeichert. Importiere einen Link oder erfasse dein erstes Rezept manuell.</p>'; }
-  catch(e){list.textContent=e.message;}
-
+  try {
+    const recipes=await api('/api/recipes');
+    const search=document.getElementById('recipe-search');
+    const normalize=value=>value.normalize('NFKD').replace(/\p{M}/gu,'').toLocaleLowerCase('de');
+    const render=()=>{
+      const terms=normalize(search.value).trim().split(/\s+/).filter(Boolean);
+      const matches=recipes.filter(r=>{
+        const text=normalize([r.title,...r.ingredients.map(x=>x.text)].join(' '));
+        return terms.every(term=>text.includes(term));
+      });
+      list.innerHTML=matches.length?matches.map(card).join(''):`<p class="empty">${recipes.length?'Keine passenden Rezepte gefunden.':'Noch keine Rezepte gespeichert. Füge dein erstes Rezept hinzu.'}</p>`;
+      document.getElementById('search-status').textContent=`${matches.length} ${matches.length===1?'Rezept':'Rezepte'}`;
+    };
+    search.addEventListener('input',render);render();
+  } catch(e){list.textContent=e.message;}
 }
-function metadata(r){return [['Portionen',r.servings],['Vorbereitung',minutes(r.prep_minutes)],['Kochen',minutes(r.cook_minutes)],['Gesamt',minutes(r.total_minutes)],['Autor',r.author]].filter(x=>x[1]).map(x=>`<span>${esc(x[0])}: ${esc(x[1])}</span>`).join('');}
+
+function metadata(r){return [['Portionen',r.servings],['Vorbereitung',minutes(r.prep_minutes)],['Kochen',minutes(r.cook_minutes)],['Gesamt',minutes(r.total_minutes)],['Backtemperatur',r.oven_temperature == null?'':`${r.oven_temperature} °C`],['Backzeit',minutes(r.bake_minutes)],['Heizart',r.oven_mode],['Autor',r.author]].filter(x=>x[1]).map(x=>`<span>${esc(x[0])}: ${esc(x[1])}</span>`).join('');}
 function ingredientGroups(items) {
   let previous;
   return items.map((item, index) => {
@@ -44,10 +57,29 @@ function parseIngredients(text) {
 }
 function renderDetail(r){
   const root=document.getElementById('detail-content');
-  root.innerHTML=`<div class="detail-hero ${r.has_image?'':'no-image'}">${r.has_image?`<img src="/api/recipes/${r.id}/image?v=${r.version}" alt="${esc(r.title)}">`:''}<div><p class="eyebrow">${esc(r.categories.join(' · ')||r.source_name||'Rezept')}</p><h1>${esc(r.title)}</h1>${r.description?`<p class="description">${esc(r.description)}</p>`:''}<div class="metadata">${metadata(r)}</div><div class="actions"><a class="button" href="/api/recipes/${r.id}/pdf">PDF herunterladen ↓</a><button class="button secondary" id="edit-button">Rezept bearbeiten</button><button class="button danger" id="delete-button">Löschen</button></div></div></div><div class="recipe-content"><section><h2>Zutaten</h2><ul>${r.ingredients.map(x=>`<li>${esc(x.text)}</li>`).join('')}</ul></section><section><h2>Zubereitung</h2><ol>${r.steps.map(x=>`<li>${esc(x.text)}</li>`).join('')}</ol></section></div>${r.source_url?`<p class="source">Quelle: <a href="${esc(r.source_url)}" target="_blank" rel="noopener noreferrer">${esc(r.source_name||r.source_url)}</a></p>`:''}`;
-   root.querySelector('.recipe-content section ul').innerHTML=ingredientGroups(r.ingredients);
+  root.innerHTML=`<div class="recipe-heading"><h1>${esc(r.title)}</h1><div class="metadata">${metadata(r)}</div></div><div class="recipe-content"><section><h2>Zutaten</h2><div id="portion-calculator"></div><ul id="scaled-ingredients">${ingredientGroups(r.ingredients)}</ul></section><section><h2>Zubereitung</h2><ol>${r.steps.map(x=>`<li>${esc(x.text)}</li>`).join('')}</ol></section></div><div class="actions"><a class="button" href="/api/recipes/${r.id}/pdf">PDF herunterladen ↓</a><button class="button secondary" id="edit-button">Rezept bearbeiten</button><button class="button danger" id="delete-button">Löschen</button></div>${r.has_image?`<img class="recipe-photo" src="/api/recipes/${r.id}/image?v=${r.version}" alt="${esc(r.title)}">`:''}${r.source_url?`<p class="source">Quelle: <a href="${esc(r.source_url)}" target="_blank" rel="noopener noreferrer">${esc(r.source_name||r.source_url)}</a></p>`:''}`;
+  setupPortionCalculator(r);
    document.getElementById('edit-button').onclick=()=>renderEdit(r);
   document.getElementById('delete-button').onclick=async()=>{if(!confirm('Dieses Rezept wirklich löschen?'))return;try{await api(`/api/recipes/${r.id}`,{method:'DELETE'});location.href='/';}catch(e){document.getElementById('page-error').textContent=e.message;}};
+}
+function setupPortionCalculator(r) {
+  const base=originalServings(r.servings);
+  const root=document.getElementById('portion-calculator');
+  if(base===null) {
+    root.innerHTML='<p class="portion-hint">Zum Umrechnen bitte die Portionszahl unter „Rezept bearbeiten“ ergänzen.</p>';
+    return;
+  }
+  root.innerHTML=`<div class="portion-inputs"><div><label for="target-portions">Gewünschte Portionen</label><input id="target-portions" type="number" min="0.1" step="any" value="${base}" aria-describedby="portion-status"></div></div><p class="portion-hint" id="portion-status" role="status"></p><button type="button" class="button secondary portion-reset">Zurücksetzen</button>`;
+  const target=root.querySelector('#target-portions');
+  function update() {
+    const to=Number(target.value);
+    const valid=Number.isFinite(to)&&to>0&&Number.isFinite(to/base);
+    document.getElementById('scaled-ingredients').innerHTML=ingredientGroups(r.ingredients.map(item=>({...item,text:valid?scaleIngredient(item.text,to/base):item.text})));
+    root.querySelector('#portion-status').textContent=valid?`Originalrezept: ${base.toLocaleString('de-DE')} Portionen. Angaben ohne Menge bleiben unverändert.`:'Bitte eine gültige Portionszahl eingeben.';
+  }
+  target.addEventListener('input',update);
+  root.querySelector('.portion-reset').onclick=()=>{target.value=base;update();};
+  update();
 }
 function field(label,name,value='',type='text'){return `<div class="field"><label for="${name}">${label}</label><input id="${name}" name="${name}" type="${type}" value="${esc(value)}"></div>`;}
 function area(label,name,value='',hint='',long=false){return `<div class="field"><label for="${name}">${label}</label>${hint?`<p class="hint">${hint}</p>`:''}<textarea id="${name}" name="${name}" class="${long?'long':''}">${esc(value)}</textarea></div>`;}
@@ -99,7 +131,7 @@ function linkImportMarkup(r) {
 }
 function renderEdit(r, creating=false) {
   const root=document.getElementById('detail-content');
-  root.innerHTML=`<div class="recipe-entry">${creating?'<h1>Rezept erfassen</h1>'+linkImportMarkup(r):''}<form id="edit-form" class="edit-form">${creating?'':`<h1>${esc(r.title)}</h1>`}${field('Rezeptname','title',r.title)}${area('Beschreibung','description',r.description||'')}<div class="edit-grid">${field('Portionen','servings',r.servings||'')}${field('Vorbereitung (Minuten)','prep_minutes',r.prep_minutes??'','number')}${field('Kochzeit (Minuten)','cook_minutes',r.cook_minutes??'','number')}${field('Gesamtzeit (Minuten)','total_minutes',r.total_minutes??'','number')}</div>${imagePickerMarkup(r)}${field('Kategorien, kommagetrennt','categories',r.categories.join(', '))}${field('Tags, kommagetrennt','tags',r.tags.join(', '))}${area('Zutaten','ingredients',ingredientLines(r.ingredients),'Eine Zutat pro Zeile; Gruppenüberschriften in [eckigen Klammern].',true)}${area('Zubereitungsschritte','steps',r.steps.map(x=>x.text).join('\n'),'Ein Schritt pro Zeile',true)}<div class="actions"><button class="button" type="submit">${creating?'Rezept speichern':'Änderungen speichern'}</button><button class="button secondary" id="cancel-button" type="button">Abbrechen</button></div><p id="edit-error" class="error" role="alert"></p></form></div>`;
+  root.innerHTML=`<div class="recipe-entry">${creating?'<h1>Rezept erfassen</h1>'+linkImportMarkup(r):''}<form id="edit-form" class="edit-form">${creating?'':`<h1>${esc(r.title)}</h1>`}${field('Rezeptname','title',r.title)}${area('Zutaten','ingredients',ingredientLines(r.ingredients),'Eine Zutat pro Zeile; Gruppenüberschriften in [eckigen Klammern].',true)}${area('Zubereitungsschritte','steps',r.steps.map(x=>x.text).join('\n'),'Ein Schritt pro Zeile',true)}<div class="edit-grid">${field('Portionen','servings',r.servings||'')}${field('Vorbereitung (Minuten)','prep_minutes',r.prep_minutes??'','number')}${field('Kochzeit (Minuten)','cook_minutes',r.cook_minutes??'','number')}${field('Gesamtzeit (Minuten)','total_minutes',r.total_minutes??'','number')}</div><fieldset class="baking-fields"><legend>Backen (optional)</legend><div class="edit-grid">${field('Temperatur (°C)','oven_temperature',r.oven_temperature??'','number')}${field('Backdauer (Minuten)','bake_minutes',r.bake_minutes??'','number')}<div class="field"><label for="oven_mode">Heizart</label><select id="oven_mode" name="oven_mode"><option value="">Bitte wählen</option>${['Ober-/Unterhitze','Umluft'].map(mode=>`<option ${r.oven_mode===mode?'selected':''}>${mode}</option>`).join('')}</select></div></div></fieldset>${imagePickerMarkup(r)}<div class="actions"><button class="button" type="submit">${creating?'Rezept speichern':'Änderungen speichern'}</button><button class="button secondary" id="cancel-button" type="button">Abbrechen</button></div><p id="edit-error" class="error" role="alert"></p></form></div>`;
   const form=root.querySelector('#edit-form');
   const imageState=setupImagePicker(root,r);
   let dirty=false;
@@ -112,6 +144,8 @@ function renderEdit(r, creating=false) {
   form.elements.title.maxLength=500;
   for(const input of form.querySelectorAll('input[type=number]')) {input.min='0';input.step='1';}
 
+  form.elements.oven_temperature.min='1';form.elements.oven_temperature.max='500';
+
   if(creating) {
     const importForm=root.querySelector('#import-form');
     importForm.onsubmit=async event=>{
@@ -120,7 +154,7 @@ function renderEdit(r, creating=false) {
       const button=importForm.querySelector('button');
       const error=root.querySelector('#form-error');
       error.textContent='';
-      const controls=[...form.querySelectorAll('input, textarea, button')];
+      const controls=[...form.querySelectorAll('input, textarea, select, button')];
       controls.forEach(control=>{control.disabled=true;});
       button.disabled=true;button.textContent='Wird geladen…';
       try {
@@ -140,11 +174,10 @@ function renderEdit(r, creating=false) {
     const value=key=>form.elements[key].value.trim();
     const lines=key=>value(key).split('\n').map(x=>x.trim()).filter(Boolean);
     const number=key=>value(key)===''?null:Number(value(key));
-    const body={...r,title:value('title'),description:value('description')||null,
+    const body={...r,title:value('title'),
       servings:value('servings')||null,prep_minutes:number('prep_minutes'),
       cook_minutes:number('cook_minutes'),total_minutes:number('total_minutes'),
-      categories:value('categories').split(',').map(x=>x.trim()).filter(Boolean),
-      tags:value('tags').split(',').map(x=>x.trim()).filter(Boolean),
+      oven_temperature:number('oven_temperature'),bake_minutes:number('bake_minutes'),oven_mode:value('oven_mode')||null,
       ingredients:parseIngredients(value('ingredients')),steps:lines('steps').map(text=>({text}))};
     const error=root.querySelector('#edit-error');
     error.textContent='';

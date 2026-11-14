@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
@@ -26,6 +27,9 @@ class RecipeData(BaseModel):
     prep_minutes: int | None = Field(default=None, ge=0)
     cook_minutes: int | None = Field(default=None, ge=0)
     total_minutes: int | None = Field(default=None, ge=0)
+    oven_temperature: int | None = Field(default=None, ge=1, le=500)
+    bake_minutes: int | None = Field(default=None, ge=0)
+    oven_mode: Literal["Ober-/Unterhitze", "Umluft"] | None = None
     image_url: str | None = None
     categories: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)

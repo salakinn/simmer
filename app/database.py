@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, create_engine, func
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, create_engine, func, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from .config import settings
 
@@ -20,6 +20,9 @@ class RecipeRecord(Base):
     prep_minutes: Mapped[int | None] = mapped_column(Integer)
     cook_minutes: Mapped[int | None] = mapped_column(Integer)
     total_minutes: Mapped[int | None] = mapped_column(Integer)
+    oven_temperature: Mapped[int | None] = mapped_column(Integer)
+    bake_minutes: Mapped[int | None] = mapped_column(Integer)
+    oven_mode: Mapped[str | None] = mapped_column(String(30))
     image_url: Mapped[str | None] = mapped_column(Text)
     image_data: Mapped[str | None] = mapped_column(Text)
     categories: Mapped[list] = mapped_column(JSON, default=list)
@@ -51,6 +54,12 @@ SessionLocal = sessionmaker(bind=engine)
 
 def init_db():
     Base.metadata.create_all(engine)
+    # Add nullable fields to existing installations without changing saved recipes.
+    with engine.begin() as connection:
+        columns = {column["name"] for column in inspect(connection).get_columns("recipes")}
+        for name, sql_type in (("oven_temperature", "INTEGER"), ("bake_minutes", "INTEGER"), ("oven_mode", "VARCHAR(30)")):
+            if name not in columns:
+                connection.execute(text(f"ALTER TABLE recipes ADD COLUMN {name} {sql_type}"))
 
 
 def get_db():

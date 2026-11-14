@@ -16,12 +16,15 @@ ol { padding-left:7mm; margin:0; } ol li { padding-left:1mm; padding-bottom:3mm;
 </style></head><body>
 <div class="overview">
 <h1>{{ recipe.title }}</h1>
-{% if recipe.description %}<p class="description">{{ recipe.description }}</p>{% endif %}
+
 <div class="meta">
 {% if recipe.servings %}<span>{{ recipe.servings }} Portionen</span>{% endif %}
 {% if recipe.prep_minutes is not none %}<span>Vorbereitung {{ recipe.prep_minutes }} Min.</span>{% endif %}
 {% if recipe.cook_minutes is not none %}<span>Kochen {{ recipe.cook_minutes }} Min.</span>{% endif %}
 {% if recipe.total_minutes is not none %}<span>Gesamt {{ recipe.total_minutes }} Min.</span>{% endif %}
+{% if recipe.oven_temperature %}<span>Backtemperatur {{ recipe.oven_temperature }} °C</span>{% endif %}
+{% if recipe.bake_minutes is not none %}<span>Backzeit {{ recipe.bake_minutes }} Min.</span>{% endif %}
+{% if recipe.oven_mode %}<span>{{ recipe.oven_mode }}</span>{% endif %}
 {% if recipe.author %}<span>Von {{ recipe.author }}</span>{% endif %}
 </div>
 {% if image_data %}<img class="hero" src="{{ image_data }}" alt="Rezeptbild">{% endif %}
